@@ -1,102 +1,158 @@
 ExUnit.start
 
-defmodule Exercise1 do
 
-  # Write a function sort2(a, b) which returns a tuple
-  # containing {a, b} is a is < b, {b, a} otherwise
+defmodule Exercise do
 
-  def sort2(a, b) do
-  end
+  # Write a module called PagedOutput. Its job is to accept
+  # lines of text and write them to a device. After every 5
+  # lines, it will start a new page of output. There will
+  # only be one PagedOutput on a node, so it should register
+  # itself by name.
+  #
+  # The `device` is passed in as a module. This module implements
+  # two functions, `write` and `new_page`. You don't need to worry
+  # about the implementation of this.
+  #
+  # The API will be:
+  #
+  # - start_link(device)
+  #   initialize the PagedOutput module. This will create a background
+  #   agent, and store the device and the current line number in it.
+  #
+  # - puts(line)
+  #   write the line to the device by calling `device.write(line)`.
+  #   If this is the 50th line on the current page, call
+  #   `device.new_page`. Returns the number of lines left
+  #   on the current page
+  #
+  # PagedOutput will be implemented using an Agent.
+
+                                ####################
+                                # start of your code #
+                                ####################
   
-  use ExUnit.Case
-  
-  test "sort2" do
-    assert sort2(1, 2) == { 1, 2 }
-    assert sort2(1, 1) == { 1, 1 }
-    assert sort2("dog", "cat") == { "cat", "dog" }
-  end
-end
+  defmodule PagedOutput do
 
-defmodule Exercise2 do
-
-  # Write a function sort2a(a, b, comparison_func)
-  #
-  # The comparison function takes two arguments and returns true
-  # if the first is less than the second.
-  #
-  # sort2a returns a tuple containing {a, b} is a is < b, {b, a} otherwise
-  #
-  # See the tests for examples of use
-
-  def sort2a(a, b, compare_func) do
-  end
-
-  use ExUnit.Case
-
-  test "sort2a" do
-
-    compare_length = fn a, b ->
-      String.length(a) < String.length(b)
+    def start_link(device) do
     end
 
-    assert sort2a("dog", "carrot", &Kernel.</2)    == { "carrot", "dog" }
-    assert sort2a("dog", "carrot", compare_length) == { "dog", "carrot" }
+    def puts(line) do
+    end
+
   end
-end
-
-defmodule Exercise3 do
-
-  # Write a module called Registry that provides 4 functions, described below.
-  # The module implements a key/value store using a named Agent.
-  # 
-  # The  API is
-  # 
-  # start_link()
-  # - initializes the module
-  # 
-  # add(key, value)
-  # - add or replace an entry in the registry
-  # 
-  # get(key)
-  # - return the value corresponding to key, or nil if the key isn't
-  #   in the registry
-  # 
-  # to_upper(key)
-  # - updates the registry, changing the string value corresponding to
-  #   key to uppercase, and returns that value. Return nil if the key is
-  #   not in the registry. You can assume the value associated with key
-  #   is a string.
 
 
-  defmodule Registry do
+                                ####################
+                                # end of your code #
+                                ####################
+
+
+
+  use ExUnit.Case
+
+  defmodule MockDevice do
+
+    @me __MODULE__
+
+    use GenServer
+
     def start_link do
+      GenServer.start_link(__MODULE__, [], name: @me)
     end
 
-    def add(key, value) do
+    def write(line) do
+      GenServer.cast(@me, {:add, line})
     end
 
-    def get(key) do
+    def new_page() do
+      GenServer.cast(@me, {:add, :np})
     end
 
-    def to_upper(key) do
+    def lines do
+      GenServer.call(@me, {:lines})
+    end
+
+    def init(_) do
+      { :ok, [] }
+    end
+
+    def handle_cast({:add, line}, lines) do
+      { :noreply, [ line | lines ] }
+    end
+
+    def handle_call({:lines}, _, lines) do
+      { :reply, Enum.reverse(lines), lines }
     end
   end
 
-  use ExUnit.Case
 
-  test "registry" do
-    Registry.start_link
-
-    Registry.add(:name1, "address1")
-    Registry.add(:name2, "address2")
-
-    assert Registry.get(:name1) == "address1"
-    assert Registry.get(:name2) == "address2"
-    assert Registry.get(:name3) == nil
-
-    assert Registry.to_upper(:name1) == "ADDRESS1"
-    assert Registry.get(:name1)      == "ADDRESS1"
-
+  def setup do
+    maybe_kill(MockDevice)
+    maybe_kill(PagedOutput)
+    MockDevice.start_link
+    PagedOutput.start_link(MockDevice)
   end
 
+  def maybe_kill(mod) do
+    pid = Process.whereis(mod)
+    if pid, do: GenServer.stop(mod)
+  end
+
+  test "puts" do
+    setup
+    PagedOutput.puts :l1
+    PagedOutput.puts :l2
+    assert MockDevice.lines == [ :l1, :l2 ]
+  end
+
+  test "pages after 5" do
+    setup
+    [ :l1, :l2, :l3, :l4, :l5 ] |> Enum.each(&PagedOutput.puts/1)
+    assert MockDevice.lines == [ :l1, :l2, :l3, :l4, :l5, :np ]
+  end
+
+  test "pages after 5 with extra lines" do
+    setup
+    [ :l1, :l2, :l3, :l4, :l5, :l6, :l7 ] |> Enum.each(&PagedOutput.puts/1)
+    assert MockDevice.lines == [ :l1, :l2, :l3, :l4, :l5, :np, :l6, :l7 ]
+  end
+
+  test "pages 1000 lines" do
+    setup
+    1..1000 |> Enum.each(fn _ -> PagedOutput.puts(:l) end)
+
+    lines = MockDevice.lines
+    assert length(lines) == 1000 + div(1000, 5)
+
+    pages = Enum.chunk(lines, 6)
+    assert length(pages) == 200
+
+    pages |> Enum.each(fn page ->
+      assert page == [ :l, :l, :l, :l, :l, :np ]
+    end)
+  end
+
+
+  def write_100_lines(n) do
+    1..100 |> Enum.each(fn _ -> PagedOutput.puts(n) end)
+  end
+
+  test "parallel access" do
+    setup
+    1..100
+    |> Enum.map(&Task.async(fn -> write_100_lines(&1) end))
+    |> Enum.each(&Task.await/1)
+
+    line_count = 100*100
+
+    lines = MockDevice.lines
+    assert length(lines) == line_count + div(line_count, 5)
+
+    pages = Enum.chunk(lines, 6)
+    assert length(pages) == div(line_count, 5)
+
+    pages |> Enum.each(fn page ->
+      assert [ _, _, _, _, _, :np ] = page
+    end)
+  end
 end
